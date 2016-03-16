@@ -1,29 +1,10 @@
 ---
 ### main.yml - common role for an OpenShift Origin deployment 
 #
-# Ansible playbook to deploy OpenShift Origin using nightly builds
-#
-
-# Setup repos
-- name: Setup OpenShift Origin Nightly Repo
-  template: src=openshift-origin-nightly.repo.j2
-            dest=/etc/yum.repos.d/openshift-origin-nightly.repo
-  when: oo_nightly == "true"
-- name: Setup OpenShift Origin Nightly Dependencies Repo
-  template: src=openshift-origin-nightly-deps.repo.j2
-            dest=/etc/yum.repos.d/openshift-origin-nightly-deps.repo
-  when: oo_nightly == "true"
-
-- name: Setup OpenShift Origin Stable
-  template: src=openshift-origin-stable.repo.j2
-            dest=/etc/yum.repos.d/openshift-origin-stable.repo
-  when: oo_stable == "true"
-- name: Setup OpenShift Origin Stable Dependencies Repo
-  template: src=openshift-origin-stable-deps.repo.j2
-            dest=/etc/yum.repos.d/openshift-origin-stable-deps.repo
-  when: oo_stable == "true"
 
 # SELinux Stuff 
+- name: SELinux python bindings for libselinux
+  yum: pkg=libselinux-python state=latest  
 - name: SELinux Enforcing (Targeted)
   selinux: policy=targeted state=enforcing
 - name: Ensure Installed - policycoreutils
@@ -31,32 +12,64 @@
 - name: Ensure Installed - policycoreutils-python
   yum: pkg=policycoreutils-python state=latest
 
-# Default firewalld configs
-- name: Ensure Install - firewalld
-  yum: pkg=firewalld state=latest
-- name: Start and Enable firewalld daemon
-  service: name=firewalld state=started enabled=yes
-  async: 10
-  poll: 2
+# Setup repos
+- name: 1.1.0. Setup OpenShift Origin Repo
+  template: src=openshift-origin.repo.j2
+            dest=/etc/yum.repos.d/openshift-origin.repo
+  when: ansible_distribution == 'CentOS' and {{ansible_distribution_major_version | version_compare('6','=')}}
+  failed_when: ansible_distribution != 'CentOS' and ansible_distribution != 'Red Hat Enterprise Linux'
+
+- name: 1.1.0. Setup OpenShift Origin Dependencies Repo
+  template: src=openshift-origin-deps.repo.j2
+            dest=/etc/yum.repos.d/openshift-origin-deps.repo
+  when: ansible_distribution == 'CentOS' and {{ansible_distribution_major_version | version_compare('6','>=')}}
+  failed_when: ansible_distribution != 'CentOS' and ansible_distribution != 'Red Hat Enterprise Linux'
+
+- name: 1.1.1. Setup EPEL Repository
+  yum: pkg=epel-release state=latest
+  register: epel_new_installation
+
+- name: 1.1.1. Setup EPEL Repository -  Test if mcollective and nodejs are excluded
+  command: /bin/grep "^exclude=\*passenger\* nodejs\*$" /etc/yum.repos.d/epel.repo
+  register: epel_excluded
+  changed_when: false
+  failed_when: false
+
+- local_action: debug msg="Setup EPEL Repository - MCollective and NodeJS exclusion not found"
+  when: epel_excluded.stdout == ""
+
+- name: 1.1.1. Setup EPEL Repository -  exclude mcollective and nodejs
+  lineinfile: dest=/etc/yum.repos.d/epel.repo
+   regexp='repo=epel-6&arch'
+   line='mirrorlist=https://mirrors.fedoraproject.org/metalink?repo=epel-6&arch=$basearch\nexclude=*passenger* nodejs*'
+   state=present
+  when: epel_excluded.stdout == ""
 
 
-# Ensure NTP installed and configured
-- name: Ensure Install - ntpdate
-  yum: pkg=ntpdate state=latest
-- name: Ensure Install - ntp
-  yum: pkg=ntp state=latest
-- name: Stop ntp daemon for ntpdate sync
-  service: name=ntpd state=stopped
-  changed_when: False
+#- name: 1.2.1. Yum Clear Cache & Yum Update
+#  yum: pkg=* state=latest update_cache=yes
+
+#- name: 1.2.1. Yum Clear Cache & Yum Update
+#  shell: yum clean all && yum repolist
+
+- name: 1.2.2. Ensure Installed - ntpd
+  yum: pkg={{ item }} state=latest
+  with_items:
+    - ntpdate
+    - ntp
+
 - name: Synchronize Clock with ntpdate
   command: /usr/sbin/ntpdate -u {{ ntpserver }}
-  changed_when: False
-- name: Start and Enable ntp daemon
-  service: name=ntpd state=started enabled=yes
-  changed_when: False
+  changed_when: false  
 
-# Configure dhclient
-- name: Configure dhclient for DNS
-  template: src=dhclient.conf.j2
-            dest="/etc/dhcp/dhclient-{{oo_external_iface}}.conf"
-            backup=yes
+- name: Start and Enable ntpd
+  service: name=ntpd state=started enabled=yes
+  
+
+# Firewall - Remove firewalld
+- name: 1.2.3. Firewall setup - Ensure firewalld uninstalled
+  yum: pkg=firewalld state=absent
+
+# Firewall - Installed lokkit
+- name: 1.2.3. Firewall setup- Ensure lokkit installed
+  yum: pkg=lokkit state=latest

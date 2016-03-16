@@ -1,10 +1,8 @@
 ---
-### main.yml - mcollective-client role for an OpenShift Origin deployment 
-#
-# Ansible playbook to deploy OpenShift Origin using nightly builds
-#
+
+- name: 5.1.0. Install MCollective Client
+  yum: pkg=ruby193-mcollective-client state=latest
 
 
 - name: Configure mcollective client
-  template: src=client.cfg.j2 dest=/etc/mcollective/client.cfg
-            owner=root group=root mode=0644 backup=yes
+  template: src=client.cfg.j2 dest=/opt/rh/ruby193/root/etc/mcollective/client.cfg

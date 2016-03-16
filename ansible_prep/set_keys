@@ -1,0 +1,146 @@
+#!/bin/bash
+
+
+# For Centos 7 - KVM 
+# Runs the ansible ping module against "all" host listed in /etc/ansible/hosts
+# * 1. Identifies which host has SSH key permission problem     
+# * 2. Check if target host is a VM running on local KVM
+# * 3. If it is, allow the user to automate addition of SSH key 
+# **  Key Injection requires the VM to be temporary turned off 
+# **  Script uses virsh to wait for the VM to be completely off
+# **  Create .ssh folder and authroized_keys if it doesn't exist
+# **  Fix SElinux label on above files
+# **  Host that has connection issues (i.e. sshd not running, filtered ssh port) are ignored
+
+clear
+
+columnWidth=30
+colorFAIL='\e[1;31m'
+colorPASS='\e[1;34m'
+colorRST='\e[0m'
+
+function addSpace()
+{
+	input=$1	
+	inputLength=${#input}
+	spaceLength=$(($columnWidth-$inputLength))
+
+	echo -n $1
+	for((i=0;i<$spaceLength;i++))
+	{
+		echo -n " "
+	}
+	echo -n "... "
+}
+
+function checkSSH()
+{
+	sshError=$(ssh $1 -o PasswordAuthentication=no -o ConnectTimeout=10 exit 2>&1)
+	([[ "$sshError" =~ ^Permission ]] && echo -e "$colorPASS$sshError$colorRST" && return 0) || { echo -e "$colorFAIL$sshError$colorRST"; return 1; }
+}
+
+function MACtoVMname
+{
+	iflist=$(virsh list --all | tail -n+3 | awk '{print $2}' | xargs -t -I {} virsh domiflist {} 2>&1 | awk '{print $NF}' | tac)
+	lineNum=$(echo "$iflist" | grep $1 -n | cut -d':' -f1)
+	echo "$iflist" | tail -n+$lineNum | sed '/^$/,$d' | tail -1
+}
+
+function turnOFFVM
+{
+	echo -n "Turn off VM? [Enter 'y' to continue]: ";read continue
+	[ "$continue" != "y" ] && echo -e "\n${colorFAIL}Aborted$colorRST \n" && return 1
+	
+	echo "Shutting Down $1"
+	
+	virsh destroy $1
+
+	echo ""
+	addSpace "Waiting for Shutdown to Complete"
+
+	while [ "$(virsh list | tail -n+2 | awk '{print $2}' | grep "^$1$")" != "" ]
+	do
+        	sleep 1
+	done
+	echo "Done"
+}
+
+echo "> ansible all --list-host"
+echo $(ansible all --list-host) | sed 's/):/)   :/'
+
+echo "> ansible all -m ping"
+vms=$(ansible all -m ping | grep UNREACHABLE | cut -d' ' -f1)
+echo -ne "${colorFAIL}UNREACHABLE$colorRST : " 
+echo $vms
+
+[ ${#vms} == 0 ] && exit 1
+
+echo ""
+echo -n "Check SSH Connections? [Enter 'y' to continue]: ";read continue
+[ "$continue" != "y" ] && echo -e "\n${colorFAIL}Aborted$colorRST \n" && exit 1 
+
+sshVMs=()
+
+for vm in $vms
+do
+	addSpace "ssh $vm" 
+	checkSSH $vm
+	if (( ! $? )); then
+		sshVMs+=("$vm")
+	fi
+done
+
+[ ${#sshVMs} == 0 ] && exit 1
+
+echo ""
+echo "-----------------------------"
+echo " Add SSH Key to:             "
+echo "-----------------------------"
+
+for vm in ${sshVMs[@]}
+do
+	echo "> $vm "
+done
+
+echo "-----------------------------"
+echo -n "[Enter 'y' to continue]: ";read continue
+[ "$continue" != "y" ] && echo -e "\n${colorFAIL}Aborted$colorRST \n" && exit 1 
+
+echo ""
+
+for vm in ${sshVMs[@]}
+do
+
+	echo "============================="
+	echo "  Processing: $vm   "
+	echo "============================="
+	echo ""
+	
+	addSpace "Resolving IP Address"
+
+	ipAddress=$(getent ahosts $vm | head -1 | cut -d' ' -f1)
+
+	[ "$ipAddress" != "" ] && echo -e "$colorPASS$ipAddress$colorRST" || { echo "FAILED";exit 1; }
+	
+
+	addSpace "Resolving MAC using ARP"
+
+	mac=$(arp -a $vm | awk '{print $4}')
+	
+	[ "$mac" != "" ] && [ "$mac" != "<incomplete>" ] && echo -e "$colorPASS$mac$colorRST" || { echo -e "${colorFAIL}FAILED$colorRST";exit 1; }
+
+	
+	addSpace "Looking up VM in virt-manager"
+
+	vmName=$(MACtoVMname $mac)
+
+
+	[ "$vmName" != "" ] && echo -e "$colorPASS${vmName}$colorRST" || { echo -e "${colorFAIL}FAILED$colorRST";exit 1; }
+
+	echo ""
+	echo ""
+
+	./ssh-copy-vm $vmName
+	[ $? == 4 ] && turnOFFVM $vmName && ./ssh-copy-vm $vmName && virsh start $vmName
+
+done

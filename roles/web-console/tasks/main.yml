@@ -1,0 +1,31 @@
+---
+
+- name: 8.1.0. Install the Web Console RPMs
+  yum: pkg=openshift-origin-console state=latest
+
+- name: remove Existing Session Secret (if any)
+  lineinfile: dest=/etc/openshift/console.conf regexp='^SESSION_SECRET ?=' state=absent
+
+- name: 8.2.1. Configure Session Secret
+  lineinfile: dest=/etc/openshift/console.conf line='SESSION_SECRET={{ broker_webconsole_secret }}'
+
+- name: 8.3.0. Configure Authentication
+  shell: cp {{item}}-basic.conf.sample {{item}}-basic.conf
+  with_items:
+    - /var/www/openshift/console/httpd/conf.d/openshift-origin-auth-remote-user
+
+- name: 8.3.1. Configure SSL
+  file: path=/etc/httpd/conf.d/ssl.conf state=absent
+
+- name: Locate Broker Proxy Configuration File
+  shell: echo /etc/httpd/conf.d/*openshift_origin_broker_proxy.conf
+  register: proxy_file
+  
+- name: Update Configuration File
+  template: src=broker_proxy.conf.j2 dest={{ proxy_file.stdout }}
+
+- name: Start/Enable Openshift Console
+  service: name=openshift-console enabled=yes state=restarted
+
+- name: Restart httpd
+  service: name=httpd state=restarted

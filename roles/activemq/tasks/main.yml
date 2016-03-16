@@ -1,36 +1,35 @@
 ---
-### main.yml - ActiveMQ role for an OpenShift Origin deployment 
-#
-# Ansible playbook to deploy OpenShift Origin using nightly builds
-#
 
-- name: Configure Persistent FirewallD for ActiveMQ
-  firewalld: port=61613/tcp permanent=true state=enabled
-- name: Configure Running FirewallD for ActiveMQ
-  firewalld: port=61613/tcp permanent=false state=enabled
+# group_var/all Variables used in this configuration
+# mq_server_user
+# mq_server_password
+# mq_server_adminpass
 
-- name: Install ActiveMQ
-  yum: pkg=activemq state=latest
-- name: Configure ActiveMQ jetty.xml
-  template: src=jetty.xml.j2
-            dest=/etc/activemq/jetty.xml
-  notify:
-    - restart activemq
-- name: Configure ActiveMQ activemq.xml
+- name: 4.1.0. Install ActiveMQ & ActiveMQ Client
+  yum: pkg={{item}} state=latest
+  with_items:
+    - activemq
+    - activemq-client
+
+- name: 4.2.0. Configure ActiveMQ activemq.xml
   template: src=activemq.xml.j2
             dest=/etc/activemq/activemq.xml
-  notify:
-    - restart activemq
-- name: Configure ActiveMQ jetty-realm.properties
+
+- name: 4.2.0. Configure ActiveMQ jetty.xml
+  template: src=jetty.xml.j2
+            dest=/etc/activemq/jetty.xml
+
+- name: 4.2.0. Configure ActiveMQ jetty-realm.properties
   template: src=jetty-realm.properties.j2
-            dest=/etc/activemq/jetty-realm.properties.xml
-  notify:
-    - restart activemq
-- name: Configure ActiveMQ tmp-activemq.conf
-  template: src=tmp-activemq.conf.j2
-            dest=/etc/tmpfiles.d/activemq.conf
-  notify:
-    - restart activemq
+            dest=/etc/activemq/jetty-realm.properties
+
+- name: 4.3.0. Add MCollective to iptables
+  command: /usr/sbin/lokkit --port=61613:tcp
+
+- name: 4.3.0. Add ActiveMQ to iptables
+  command: /usr/sbin/lokkit --port=8161:tcp
+
 - name: Start and Enable ActiveMQ
-  service: name=activemq state=started enabled=yes
- 
+  service: name=activemq state=restarted enabled=yes 
+
+

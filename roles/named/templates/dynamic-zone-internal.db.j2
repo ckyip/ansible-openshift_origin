@@ -1,0 +1,11 @@
+$TTL 1800
+@	IN	SOA	ns1.{{ internal_domain }}. hostmaster.{{ internal_domain }}. (
+                         1	    ; serial
+                         60         ; refresh (1 minute)
+                         15         ; retry (15 seconds)
+                         1800       ; expire (30 minutes)
+                         10         ; minimum (10 seconds)
+                          );
+
+@	IN	NS	ns1.{{ internal_domain }}.
+ns1	IN	A	{{ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['address'] }}

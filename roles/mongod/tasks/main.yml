@@ -1,50 +1,48 @@
 ---
-### main.yml - mongod role for an OpenShift Origin deployment 
-#
-# Ansible playbook to deploy OpenShift Origin using nightly builds
-#
 
-- name: Configure Persistent FirewallD for mongod
-  firewalld: port=27017/tcp permanent=true state=enabled
-- name: Configure Running FirewallD for mongod
-  firewalld: port=27017/tcp permanent=false state=enabled
+# group_vars/all Variables used in this yml
+# mongo_db_name
+# mongo_admin_user
+# mongo_admin_passwd
+# mongo_auth_user
+# mongo_auth_passwd
 
-- name: Install MongoDB pkgs
+
+
+- name: 3.1.0. Install the mongod server
   yum: pkg="{{item}}" state=latest
   with_items:
-    - mongodb
     - mongodb-server
-    - ruby
+    - mongodb
+    - libmongodb
 
-- name: Check for mongo auth
-  shell: "{{egrep}} '^auth = true' /etc/mongodb.conf || echo $?"
-  register: r_checkmongoauth
-  changed_when: False
+- name: 3.2.1. Setup MongoDB smallfiles option
+  lineinfile: dest=/etc/mongodb.conf line='smallfiles=true'
 
-# FIXME - This is ugly, should find something better.
-- name: Ensure MongoDB daemon stopped
+- name: 3.2.2. Disable Authentication
+  lineinfile: dest=/etc/mongodb.conf regexp='^auth ?=' state=absent
+
+- name: Start MongoDB Server
+  service: name=mongod state=started
+
+# Next part doesn't seem to work unless server is restarted twice
+- name: Restart MongoDB Server
+  service: name=mongod state=restarted
+
+- name: Create OpenShift broker user
+  command: /usr/bin/mongo localhost/{{ mongo_db_name }} --eval 'db.addUser("{{ mongo_auth_user }}", "{{ mongo_auth_passwd }}")'
+
+- name: Create OpenShift admin user
+  command: /usr/bin/mongo localhost/admin --eval 'db.addUser("{{ mongo_admin_user }}", "{{ mongo_admin_passwd }}")'
+
+- name: Stop MongoDB Server
   service: name=mongod state=stopped
-  when: r_checkmongoauth.stdout == "1"
 
-- name: Configure MongoDB
-  template: src=mongodb.conf.j2 dest=/etc/mongodb.conf backup=yes
-  when: r_checkmongoauth.stdout == "1"
+- name: Enable Authenication
+  lineinfile: dest=/etc/mongodb.conf line='auth = true'
 
-- name: Start and Enable MongoDB daemon
-  service: name=mongod state=started enabled=yes
+- name: 3.3.0. Add MongoDB to iptables
+  command: /usr/sbin/lokkit --port=27017:tcp  
 
-- name: MongoDB user/pw script template copy
-  template: src=set_mongopw.sh.j2 dest=/tmp/00-set_mongopw.sh
-            owner="{{ansible_user_id}}" group="{{ansible_user_id}}"
-            mode=0500
-  when: r_checkmongoauth.stdout == "1"
-- name: Run MongoDB user/pw script
-  action: raw /tmp/00-set_mongopw.sh
-  when: r_checkmongoauth.stdout == "1"
-- name: Clean up after MongoDB user/pw script
-  file: path=/tmp/00-set_mongopw.sh state=absent
-- name: Enable mongo auth
-  shell: printf "auth = true\n" >> /etc/mongodb.conf
-  when: r_checkmongoauth.stdout == "1"
-  notify: restart mongod
-
+- name: 3.4.0. Enable/Start MongoDB Server
+  service: name=mongod state=restarted enabled=yes

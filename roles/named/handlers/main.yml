@@ -1,8 +1,0 @@
----
-### main.yml - named handlers for an OpenShift Origin deployment 
-#
-# Ansible playbook to deploy OpenShift Origin using nightly builds
-#
-
-- name: restart named
-  service: name=named state=restarted

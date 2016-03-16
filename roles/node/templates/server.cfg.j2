@@ -1,8 +1,11 @@
 main_collective = mcollective
 collectives = mcollective
 libdir = /opt/rh/ruby193/root/usr/libexec/mcollective
-logfile = /var/log/openshift/broker/ruby193-mcollective-client.log
+logfile = /var/log/openshift/node/ruby193-mcollective.log
 loglevel = debug
+daemonize = 1
+direct_addressing = 1
+registerinterval = 30
 
 # Plugins
 securityprovider = psk
@@ -13,9 +16,13 @@ plugin.activemq.pool.size = 1
 plugin.activemq.pool.1.host = {{ mq_fqdn }}
 plugin.activemq.pool.1.port = 61613
 plugin.activemq.pool.1.user = {{ mq_server_user }}
-plugin.activemq.pool.1.password = {{ mq_server_password }}
+plugin.activemq.pool.1.password = {{ mq_server_password }} 
 
 plugin.activemq.stomp_1_0_fallback = 0
 plugin.activemq.heartbeat_interval = 30
 plugin.activemq.max_hbread_fails = 2
 plugin.activemq.max_hbrlck_fails = 2
+
+# Facts
+factsource = yaml
+plugin.yaml = /opt/rh/ruby193/root/etc/mcollective/facts.yaml

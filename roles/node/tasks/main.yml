@@ -1,0 +1,317 @@
+---
+
+# The following is partially written as if there is multi-broker (for practicing Ansible)
+# This is not necessary since the configuration is for setting up a Single Broker
+
+# If modified for multi broker.  The following should only do nsupdate on Master 
+# not Slave DNS Server.  Need a variable such as master_dns to indicate the master dns server
+
+- name: 9.1.0. nsupdate add self to Broker's DNS - External Domain
+  shell: oo-register-dns -h node{{groups['nodes'].index(inventory_hostname)}} -d {{ infra_domain }} -n {{ hostvars[inventory_hostname]["ansible_" + eth_dev_external]['ipv4']['address'] }} -k /var/named/{{ infra_domain }}.key
+  delegate_to: "{{ item }}"
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+# See above
+- name: 9.1.0. nsupdate add self to Broker's DNS - Internal Domain
+  shell: oo-register-dns -h node{{groups['nodes'].index(inventory_hostname)}} -d {{ internal_domain }} -n {{ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['address'] }} -k /var/named/{{ internal_domain }}.key
+  delegate_to: "{{ item }}"
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+- name: Ensure Installed - scp
+  yum: pkg=openssh-clients state=latest
+
+- name: 9.2.0. Copy Broker's SSH Public Key to Node (localhost scp -3)
+  local_action: shell scp -3 {{ item }}:{{ broker_rsync_key_path }}.pub {{ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['address'] }}:~/.ssh/$(echo {{ broker_rsync_key_path }} | rev | cut -d'/' -f1 | rev){{ groups['brokers'].index(item) }}.pub
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+- name: Check if Public Key already exist in authorized_keys file
+  shell: grep "$(cat ~/.ssh/$(echo {{ broker_rsync_key_path }} | rev | cut -d'/' -f1 | rev){{ groups['brokers'].index(item) }}.pub)" ~/.ssh/authorized_keys
+  register: key_exists
+  failed_when: false
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+
+- name: Append Broker's SSH Public Key to Node's Authorized Keys
+  shell: cat ~/.ssh/$(echo {{ broker_rsync_key_path }} | rev | cut -d'/' -f1 | rev){{ groups['brokers'].index(item.item) }}.pub >> ~/.ssh/authorized_keys
+  no_log: True
+  with_items: 
+    - "{{ key_exists.results }}"
+  when: item.rc == 1
+
+- name: Delete Existing DNS Configuration on Node's Network Device
+  lineinfile: dest=/etc/sysconfig/network-scripts/ifcfg-{{ item }} regexp="^DNS.*" state=absent
+  with_items:
+    - "{{ eth_dev_internal }}"
+    - "{{ eth_dev_external }}"
+
+- name: 9.3.0. Configure DNS Resolution on Node's {{ eth_dev_internal }} device
+  lineinfile: dest=/etc/sysconfig/network-scripts/ifcfg-{{ eth_dev_internal }}
+              line="DNS{{(groups['brokers'].index(item)+1)|int}}={{ hostvars[item]["ansible_" + eth_dev_internal]['ipv4']['address'] }}"
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+- name: 9.3.0. Configure DNS Resolution on Node's {{ eth_dev_external }} device
+  lineinfile: dest=/etc/sysconfig/network-scripts/ifcfg-{{ eth_dev_external }}
+              line="DNS{{(groups['brokers'].index(item)+1)|int}}={{ hostvars[item]["ansible_" + eth_dev_internal]['ipv4']['address'] }}"
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+- name: Prevent DNS being overwritten by dhcpclient
+  shell: echo "supersede domain-name-servers {{ hostvars[item]["ansible_" + eth_dev_internal]['ipv4']['address'] }}" > /etc/dhcp/dhclient-{{ eth_dev_external }}.conf
+  with_items:
+    - "{{ groups['brokers'] }}"
+
+- name: Delete Existing Hostname
+  lineinfile: dest=/etc/sysconfig/network regexp="^HOSTNAME.*" state=absent
+
+- name: 9.4.0. Configure Hostname
+  lineinfile: dest=/etc/sysconfig/network line="HOSTNAME=node{{groups['nodes'].index(inventory_hostname)}}.{{ infra_domain }}"
+
+- name: 9.4.0. Set Hostname for Current Session
+  shell: hostname "node{{groups['nodes'].index(inventory_hostname)}}.{{ infra_domain }}"
+
+- name: Restart Network Service
+  service: name=network state=restarted
+
+- name: 9.5.1. Install MCollective
+  yum: pkg=openshift-origin-msg-node-mcollective state=latest
+
+- name: Fix MCollective lock file
+  file: path=/opt/rh/ruby193/root/var/run state=directory
+
+- name: 9.6.0. Configure MCollective
+  template: src=server.cfg.j2 dest=/opt/rh/ruby193/root/etc/mcollective/server.cfg
+
+- name: Start and Enable MCollective
+  service: name=ruby193-mcollective state=restarted enabled=yes
+
+- name: 9.7.1. Install the Core Packages
+  yum: pkg={{ item }} state=latest
+  with_items:
+    - rubygem-openshift-origin-node
+    - rubygem-passenger-native
+    - openshift-origin-port-proxy
+    - openshift-origin-node-util
+    - rubygem-openshift-origin-container-selinux
+
+- name: 9.7.2. Install Apache
+  yum: pkg=httpd state=latest
+
+- name: Remove openshift_origin_node_servername.conf.rpmnew
+  file: path=/etc/httpd/conf.d/000001_openshift_origin_node_servername.conf.rpmnew state=absent
+
+- name: Configure openshift_origin_node_servername.conf
+  shell: echo "ServerName node{{groups['nodes'].index(inventory_hostname)}}.{{ infra_domain }}" > /etc/httpd/conf.d/000001_openshift_origin_node_servername.conf
+
+- name: Install apache-mod-rewrite Plugin
+  yum: pkg=rubygem-openshift-origin-frontend-apache-mod-rewrite state=latest
+
+- name: 9.7.4. Install nodejs-websocket Plugin
+  yum: pkg={{ item }} state=latest
+  with_items:
+    - openshift-origin-node-proxy
+    - rubygem-openshift-origin-frontend-nodejs-websocket
+    - facter
+
+- name: Start and Enable Web Proxy Service
+  service: name=openshift-node-web-proxy state=restarted enabled=yes
+
+
+- name: 9.7.5. Setup firewall rules for gear port proxy
+  copy: src=iptables dest=/etc/sysconfig/iptables
+
+- name: Restart iptables
+  service: name=iptables state=restarted
+
+- name: Start iptables-port-proxy
+  service: name=openshift-iptables-port-proxy state=started
+
+- name: 9.7.6. Install Mandatory Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_mandatory }}"
+
+- name: 9.7.6. Install Application Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_app }}"
+
+- name: 9.7.6. Install Database Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_db }}"
+
+- name: 9.7.6. Install Administrative Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_admin }}"
+
+
+- name: 9.7.6. Install Recommended Dependencies Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_rec_dep }}"
+
+- name: 9.7.6. Install Optional Dependencies Cartridges
+  yum: name={{ item }} state=latest
+  with_items:
+    - "{{ cartridges_opt_dep }}"
+
+- name: 9.8.0. Enable Required Services
+  service: name={{ item }} enabled=yes
+  with_items:
+    - httpd
+    - sshd
+    - oddjobd
+
+- name: 10.2.0. Configure PAM Modules /etc/pam.d
+  copy: src={{ item }} dest=/etc/pam.d/
+  with_items:
+    - runuser
+    - runuser-l
+    - sshd
+    - su
+    - system-auth-ac
+
+- name: 10.2.0. Configure PAM Modules /etc/security/namespace.d/
+  copy: src={{ item }} dest=/etc/security/namespace.d/
+  with_items:
+    - sandbox.conf
+    - tmp.conf
+    - vartmp.conf
+
+- name: 10.3.0. Start and Enable cgroups
+  service: name={{ item }} state=restarted enabled=yes
+  with_items:
+    - cgconfig
+    - cgred
+
+- name: Find Device Name /var/lib/openshift is on
+  shell: df -P -T /var/lib/openshift | tail -1 | awk '{print $1}'
+  register: device_lib_openshift  
+  changed_when: False
+
+- name: Construct new configuration line for device
+  shell: echo "$(df -P -T /var/lib/openshift | tail -1 | awk '{print $1,$NF,$2}') defaults,usrquota 1 1"
+  register: device_lib_openshift_new_config
+  changed_when: False
+
+- name: Check if disk quota is already in effect
+  shell: grep "^{{ device_lib_openshift_new_config.stdout }}$" /etc/fstab
+  register: fstab_usrquota
+  ignore_errors: True
+  changed_when: False
+  failed_when: False
+
+- name: Find Partition /var/lib/openshift is on
+  shell: df -P -T /var/lib/openshift | tail -1 | awk '{print $NF}'
+  register: partition_lib_openshift 
+  changed_when: False
+  when: fstab_usrquota.rc != 0
+
+- name: 10.4.0. Configure Disk Quotas
+  replace: dest=/etc/fstab
+    regexp="^{{ device_lib_openshift.stdout }}.*"
+    replace="{{device_lib_openshift_new_config.stdout}}"
+  when: fstab_usrquota.rc != 0
+
+- name: Remount Partition
+  shell: mount -o remount {{ partition_lib_openshift.stdout }}
+  changed_when: false
+  when: fstab_usrquota.rc != 0
+
+- name: Turn off Disk Quota
+  shell: quotaoff -a
+  changed_when: false
+  when: fstab_usrquota.rc != 0
+
+
+- name: Run quotacheck
+  shell: quotacheck -cmug {{ partition_lib_openshift.stdout }}
+  failed_when: false
+  changed_when: false
+  ignore_errors: True
+  no_log: True
+  when: fstab_usrquota.rc != 0
+
+- name: Restorecon aquota.user
+  shell: cd {{ partition_lib_openshift.stdout }} && restorecon aquota.user
+  when: fstab_usrquota.rc != 0
+
+- name: Re-enable quotas
+  shell: quotaon {{ partition_lib_openshift.stdout }}
+  when: fstab_usrquota.rc != 0
+
+- local_action: debug msg="Disk Quota is already set for {{ device_lib_openshift.stdout }}.  No changes was Made."
+  when: fstab_usrquota.rc == 0 
+
+- name: 10.5.1. Configure SELinux
+  seboolean: name={{ item }} state=true persistent=yes
+  with_items:
+    - httpd_run_stickshift
+    - httpd_execmem
+    - httpd_unified
+    - httpd_can_network_connect
+    - httpd_can_network_relay
+    - httpd_read_user_content
+    - httpd_enable_homedirs
+    - allow_polyinstantiation
+
+- name: Restorecon
+  shell: restorecon -rv {{ item }}
+  with_items:
+    - /var/run
+    - /var/lib/openshift
+    - /etc/openshift/node.conf
+    - /etc/httpd/conf.d/openshift
+
+- name: 10.5.2. Configuring System Control Settings
+  copy: src=sysctl.conf dest=/etc/sysctl.conf
+
+- name: Reload System Control Configuration
+  shell: sysctl -p /etc/sysctl.conf
+
+- name: Configure SSH Pass Through GIT_SSH ENV Variable
+  lineinfile: dest=/etc/ssh/sshd_config line="AcceptEnv GIT_SSH"
+
+- name: Increase number of ssh connection allowed
+  copy: src=sshd_config dest=/etc/sshd_config
+
+- name: 10.7.0. Start and Enable Traffic Control Service
+  service: name=openshift-tc state=restarted enabled=yes
+
+# Please see 9.7.5. 
+# openshift-iptables-port-proxy
+# https://access.redhat.com/documentation/en-US/OpenShift_Enterprise/2/html/Deployment_Guide/Configuring_the_Port_Proxy.html
+#
+#- name: 10.7.1. Start and Enable Port Proxy
+#  service: name=openshift-port-proxy state=restarted enabled=yes
+
+- name: 10.7.1. Enable Openshift-Gears Service
+  service: name=openshift-gears enabled=yes
+
+- name: 10.7.2. Configure Node.conf
+  template: src=node.conf.j2 dest=/etc/openshift/node.conf
+
+- name: Configure Environment Variable - OPENSHIFT_BROKER_HOST
+  shell: echo "{{ broker_fqdn_internal }}" > /etc/openshift/env/OPENSHIFT_BROKER_HOST
+
+- name: Configure Environment Variable - OPENSHIFT_CLOUD_DOMAIN
+  shell: echo "{{ infra_domain }}" > /etc/openshift/env/OPENSHIFT_CLOUD_DOMAIN
+
+- name: 10.8.0. Update login.defs
+  copy: src=login.defs dest=/etc/login.defs
+
+- name: 10.9.0. Update the facter Database
+  command: /etc/cron.minutely/openshift-facts
+
+- name: Restart Services
+  service: name={{ item }} state=restarted
+  with_items:
+    - httpd
+    - ruby193-mcollective
+    - openshift-tc

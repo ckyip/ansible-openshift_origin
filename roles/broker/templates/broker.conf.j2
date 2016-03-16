@@ -1,0 +1,180 @@
+# Domain suffix to use for applications (Must match node config)
+CLOUD_DOMAIN="{{ infra_domain }}"
+# Comma-separated list of valid gear sizes
+# Eg: "small,medium,large"
+VALID_GEAR_SIZES="small"
+
+# Comma-separated list of allowed types for ssh keys. krb5-principal keys are added to .k5login, instead of authorized_keys
+#VALID_SSH_KEY_TYPES="ssh-rsa,ssh-dss,ssh-rsa-cert-v01@openssh.com,ssh-dss-cert-v01@openssh.com,ssh-rsa-cert-v00@openssh.com,ssh-dss-cert-v00@openssh.com,krb5-principal"
+
+# Default number of domains to assign to a new user
+DEFAULT_MAX_DOMAINS="10"
+# Default number of gears to assign to a new user
+DEFAULT_MAX_GEARS="100"
+# Default gear sizes (comma-separated) allowed to a new user
+DEFAULT_GEAR_CAPABILITIES="small"
+# Default gear size for a new gear
+DEFAULT_GEAR_SIZE="small"
+# Default user capability to create Highly Available applications
+DEFAULT_ALLOW_HA="false"
+# Default maximum number of teams a user can create
+DEFAULT_MAX_TEAMS="0"
+# Default whether a user can search and view all global teams
+DEFAULT_VIEW_GLOBAL_TEAMS="false"
+# Default max untracked additional storage per gear
+DEFAULT_MAX_UNTRACKED_ADDTL_STORAGE_PER_GEAR="0"
+# Default max tracked additional storage per gear
+DEFAULT_MAX_TRACKED_ADDTL_STORAGE_PER_GEAR="0"
+
+# For replica sets, use ',' delimiter for multiple servers
+# Eg: MONGO_HOST_PORT="<host1:port1>,<host2:port2>..."
+MONGO_HOST_PORT="{{ mongo_db_fqdn }}:27017"
+MONGO_USER="{{ mongo_auth_user }}"
+MONGO_PASSWORD="{{ mongo_auth_passwd }}"
+MONGO_DB="{{ mongo_db_name }}"
+#MONGO_TEST_DB="openshift_broker_test"
+MONGO_SSL="false"
+MONGO_WRITE_REPLICAS=1
+
+#Enables gear/filesystem resource usage tracking
+ENABLE_USAGE_TRACKING_DATASTORE="true"
+#Log resource usage information
+ENABLE_USAGE_TRACKING_AUDIT_LOG="false"
+USAGE_TRACKING_AUDIT_LOG_FILE="/var/log/openshift/broker/usage.log"
+
+#Enable all broker analytics
+ENABLE_ANALYTICS="false"
+
+#Enables logging of REST API operations and success/failure
+ENABLE_USER_ACTION_LOG="true"
+USER_ACTION_LOG_FILE="/var/log/openshift/broker/user_action.log"
+
+# Whenever this value is changed all gear encryption tokens must be recreated.
+# It's recommended that you set this value using "openssl rand -base64 64".  It
+# must be the same across all Brokers.
+AUTH_SALT="{{ broker_auth_salt }}"
+AUTH_PRIV_KEY_FILE="{{ broker_auth_privkey_path }}"
+AUTH_PRIV_KEY_PASS=""
+AUTH_PUB_KEY_FILE="{{ broker_auth_pubkey_path }}"
+AUTH_RSYNC_KEY_FILE="{{ broker_rsync_key_path }}"
+
+# Set the default and maximum expiration for authorization tokens by
+# type.  Comma delimited list of expiration pairs, where the key 
+# corresponds the canonical form of a scope, and the value corresponds 
+# to one or two time durations.  The time durations may be specified in 
+# standard ruby syntax (<number>.days) are converted to seconds.  If two
+# times are specified, the first is the default value and the second is
+# the maximum duration the token may exist for. The key '*' will apply
+# to all other scopes.
+# 
+# Recognized scopes:
+#
+#   userinfo - access to only information about the current user
+#   read     - read-only access to the REST API
+#   session  - full access as the user
+# 
+# Examples:
+#
+#   # All tokens, regardless of type, expire in 1 month and default to
+#   # 1 month in duration.
+#   AUTH_SCOPE_TIMEOUTS="*=1.months"   
+#
+#   # All tokens, regardless of type, expire in 1 month and default to
+#   # 1 week in duration.
+#   AUTH_SCOPE_TIMEOUTS="*=1.week|1.months"   
+#
+#   # The read scope expires in 1 day, all other tokens expire in one
+#   # week.
+#   AUTH_SCOPE_TIMEOUTS="read=1.month, *=1.week"
+#
+# The value may be any valid Ruby expression that evaluates to a number.
+#
+AUTH_SCOPE_TIMEOUTS="session=1.days|7.days, sso=1.days|7.days, oauthaccesstoken=10.minutes|10.minutes, *=1.months|6.months"
+
+# This session must be shared amongst all Brokers but otherwise secret.  If
+# this value is changed sessions will be dropped.  This value is used for
+# setting the rails secret_token (or the secret_key_base for Rails 4.0).
+# "openssl rand -hex 64" can be use to generate a unique value.
+#
+SESSION_SECRET="{{ broker_session_secret }}"
+
+#Enable/disable maintenance mode
+ENABLE_MAINTENANCE_MODE="false"
+MAINTENANCE_NOTIFICATION_FILE="/etc/openshift/outage_notification.txt"
+
+# Give users the ability to download a cartridge into their gears on creation and cartridge add
+DOWNLOAD_CARTRIDGES_ENABLED="true"
+# For downloading cartridges, follow these constraints
+MAX_DOWNLOADED_CARTS_PER_APP="5"
+MAX_DOWNLOAD_REDIRECTS="2"
+MAX_DOWNLOAD_TIME="10"
+# Maximum size for downloadable manifest file (in bytes)
+MAX_CART_SIZE="20480"
+# Maximum number of seconds for connection to be established when downloading
+# a cartridge.
+CART_DOWNLOAD_CONN_TIMEOUT="2"
+
+# Set a HTTP proxy server for downloading cartridges
+#
+# HTTP_PROXY="proxy.server.com:3128"
+
+# Team collaboration settings
+MAX_MEMBERS_PER_RESOURCE="100"
+MAX_TEAMS_PER_RESOURCE="5"
+
+# Whether cartridges that specify direct SSL connection to the gear
+# are allowed, denied or forced.
+SSL_ENDPOINT="allow"
+# SSL_ENDPOINT="deny"
+# SSL_ENDPOINT="force"
+
+# Config flag to allow scalable applications to become Highly Available
+ALLOW_HA_APPLICATIONS="false"
+
+# Should OpenShift handle the registration and deregistration of HA DNS entries pointing to the external router?
+# This flag applies in cases where an external router is using to route application traffic to the gears
+# Set this to "true" if you want OpenShift to create/delete HA DNS entries upon application creation/deletion.
+# When using an external router, if this flag is set to "false", the HA DNS entries will need to be created externally.
+# Failure to do that could prevent the application from receiving traffic through the external router
+MANAGE_HA_DNS="false"
+
+# This is the public hostname that the HA DNS entries for an application point to
+# This allows setting up an external router and routing application traffic to the application's gears   
+ROUTER_HOSTNAME="www.example.com"
+
+# Prefix/Suffix used for Highly Available application URL
+# http://${HA_DNS_PREFIX}${APP_NAME}-${DOMAIN_NAME}${HA_DNS_SUFFIX}.${CLOUD_DOMAIN}
+HA_DNS_PREFIX="ha-"
+HA_DNS_SUFFIX=""
+
+# This configuration determines if multiple haproxy gears can be hosted on the same node. 
+# If allowed, the frontend apache will route the web traffic being sent to this node 
+# using the app_dns or the alias to ONLY one of the haproxy gears that has the mapping. 
+# To avoid this situation, this flag should be set to false in production environments.
+ALLOW_MULTIPLE_HAPROXY_ON_NODE="false"
+
+#Whether to allow obsolete cartridges to be instantiated for a new application or added to an existing application
+ALLOW_OBSOLETE_CARTRIDGES="false"
+
+# Whether to allow users to create aliases that are under the cloud domain. Note:
+# Aliases of the form word-word.<domain> are rejected to prevent conflicts with app names.
+# Also this still will not create any DNS entry for the alias; that is an external step.
+ALLOW_ALIAS_IN_DOMAIN="false"
+
+# Whether to send OpenShift log messages to syslog or to files.
+# If true, messages that normally end up in the Rails environment-specific log
+# (e.g. production.rb), usage.log, and user_action.log will instead go to syslog.
+# SYSLOG_ENABLED="true"
+
+# Customize default app templates for specified framework cartridges.
+# Space-separated list of elements <cartridge-name>|<git url> - URLs must be available for all nodes.
+# URL will be cloned as the git repository for the cartridge at app creation unless the user specifies their own.
+# e.g.: DEFAULT_APP_TEMPLATES=php-5.3|http://example.com/php.git perl-5.10|file:///etc/openshift/cart.conf.d/templates/perl.git
+# WARNING: do not include private credentials in any URL; they would be visible in every app's cloned repository.
+DEFAULT_APP_TEMPLATES=
+
+# List the node platforms available on the cloud
+# Comma-separated list of node platforms (e.g.:linux,windows).
+# All node platforms must be present in the node network.
+# In the case of conflicting cartridges, priority is given to the platforms with a lower index.
+# NODE_PLATFORMS=linux

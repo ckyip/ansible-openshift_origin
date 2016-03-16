@@ -1,0 +1,52 @@
+#!/bin/bash
+
+keyPATH='/root/.ssh/id_rsa.pub'
+
+[ $(id -u) != 0 ] && echo "Error: You must be root to execute this script" && exit 1
+cat $keyPATH &> /dev/null && [ $(wc -l $keyPATH | cut -d' ' -f1) != 0 ] || { echo "Error: SSH Key is missing";exit 1; }
+
+/usr/bin/rpm -qi libguestfs-tools > /dev/null || { echo "Error: libguestfs-tools is not installed";exit 1; }
+
+[ $# == 0 ] && echo "Error:  Please provide a vm name" && exit 2
+
+
+function getVMStatus
+{
+	echo "$(virsh list --all | grep -w " $1 " | awk '{print$NF}')"
+}
+
+vm=$1
+
+#for vm in $*
+#do
+
+status=$(getVMStatus $vm)
+
+
+[ "$status" == "" ] && echo "Error: VM: $vm not found." && exit 3
+[ "$status" != "off" ] && [ "$status" != "crashed" ] && echo "Error: Please turn off \"$vm ($status)\" and try again." && exit 4
+
+
+vmKey=`guestfish --rw -d $vm -i << _eof_
+	mkdir-p /root/.ssh
+	chmod 0700 /root/.ssh
+	touch /root/.ssh/authorized_keys
+	chmod 0600 /root/.ssh/authorized_keys
+	sh "/sbin/setfiles -q /etc/selinux/targeted/contexts/files/file_contexts /root/.ssh"
+	sh "/sbin/setfiles -q /etc/selinux/targeted/contexts/files/file_contexts /root/.ssh/authorized_keys"
+	cat /root/.ssh/authorized_keys
+_eof_`
+
+hostKey=$(cat $keyPATH)
+
+echo $vmKey | grep "$(echo $hostKey)" > /dev/null
+if (($?));then
+	echo "Adding key to \"$vm\""
+
+	guestfish --rw -d $vm -i write-append /root/.ssh/authorized_keys "$(echo $hostKey)
+"
+else
+	echo "Key already exist in \"$vm\"" && exit 1	
+fi
+
+#virt-edit --rw -a $diskPATH -i

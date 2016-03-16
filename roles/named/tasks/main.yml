@@ -1,62 +1,119 @@
----
-### main.yml - named role for an OpenShift Origin deployment 
+# Based on OpenShift Origin Comprehensive Deployment Guide
+# https://docs.openshift.org/origin-m4/oo_deployment_guide_comprehensive.html#preparing-the-broker-host-system
+
+
+# group_vars/all Variables used in this yml
+# infra_domain = openshift domain name
+# named_forwarder_ip = DNS forwarders
 #
-# Ansible playbook to deploy OpenShift Origin using nightly builds
 #
 
-- name: Configure Persistent FirewallD for BIND
-  firewalld: service=dns permanent=true state=enabled
-- name: Configure Running FirewallD for BIND
-  firewalld: service=dns permanent=false state=enabled
-
-- name: Install bind
+- name: 2.1.1. Install the BIND DNS Server
   yum: pkg={{item}} state=latest
   with_items:
     - bind
     - bind-utils
 
-- name: Configure named dynamic-domain.db
-  template: src=dynamic-zone.db.j2
-            dest=/var/named/dynamic/{{cloud_domain}}.db
-            backup=yes
-  notify:
-  - restart named
-- name: Configure named infra-zone.db
-  template: src=infra-zone.db.j2
-            dest=/var/named/{{infra_domain}}.db
-            backup=yes
-  notify:
-  - restart named
-- name: Configure named forwarders.conf
+- name: Check for existing key files ({{ infra_domain }})
+  shell: ls -l K{{ infra_domain }}.* | awk '{ print $NF }'
+  changed_when: False
+  failed_when: False
+  no_log: True
+  register: key_search
+
+- name: Delete exisiting key files ({{ infra_domain }}
+  file: path="~/{{ item }}" state=absent
+  with_items:
+    - "{{ key_search.stdout_lines}}"
+  when: key_search.stdout != ""
+
+- name: Check for existing key files ({{ internal_domain }} )
+  shell: ls -l K{{ internal_domain }}.* | awk '{ print $NF }'
+  changed_when: False
+  failed_when: False
+  no_log: True
+  register: key_search
+
+- name: Delete exisiting key files ({{ internal_domain }}
+  file: path="~/{{ item }}" state=absent
+  with_items:
+    - "{{ key_search.stdout_lines}}"
+  when: key_search.stdout != ""
+
+- name: 2.1.2. Generate DNSSEC Keys
+  command: dnssec-keygen -a HMAC-MD5 -b 512 -n USER -r /dev/urandom {{ item }}
+  with_items:
+    - "{{ infra_domain }}"
+    - "{{ internal_domain }}"
+
+- name: Create rndc key
+  command: rndc-confgen -a -r /dev/urandom
+
+- name: Change Ownership of rndc.key to root:named & Permission to 640
+  file: path=/etc/rndc.key owner=root group=named mode=0640
+
+
+- name: 2.1.3. Create a forwarders.conf file for host name resolution
   template: src=forwarders.conf.j2
-            dest=/var/named/forwarders.conf
-            backup=yes
-  notify:
-  - restart named
-- name: Configure named named.conf
-  template: src=named.conf.j2
-            dest=/etc/named.conf
-            backup=yes
-  notify:
-  - restart named
+            dest=/var/named/forwarders.conf owner=root group=named
 
-## FIXME: - Need a more clean way to do this
-- name: Setup DNSSEC Keys and Config script
-  template: src=named_dnssec_setup.sh.j2
-            dest=/root/00-setup_dnssec.sh
-            owner=root group=root mode=0500
-  changed_when: False
-- name: Run named DNSSEC script 
-  command: /root/00-setup_dnssec.sh
-  register: command_result
-  ignore_errors: True
-  changed_when: "command_result.rc != 0"
-  notify:
-  - restart named
+- name: Change Ownership of forwarders.conf to 640
+  file: path=/var/named/forwarders.conf mode=0640
 
-- name: Clean up after named DNSSEC script
-  file: path=/root/00-setup_dnssec.sh state=absent
-  changed_when: False
+- name: 2.1.4. Configure external domain resolution and create an initial DNS database
+  template: src=dynamic-zone-external.db.j2 dest=/var/named/dynamic/{{ infra_domain }}.db
+  
+- name: 2.1.4. Configure internal domain resolution and create an initial DNS database
+  template: src=dynamic-zone-internal.db.j2 dest=/var/named/dynamic/{{ internal_domain }}.db
 
-- name: restart/enable named daemon
-  service: name=named state=started enabled=yes
+- name: Set new DNSSEC Key to KEY variable - External Domain
+  shell: grep 'Key:' K*{{infra_domain}}*.private | cut -d ' ' -f 2
+  register: KEY
+
+- name: 2.1.4. Generate DNSSEC Key file - External Domain
+  template: src=dnsseckey.j2 dest=/var/named/{{ infra_domain }}.key
+  vars:
+    CURRENT_DOMAIN: "{{ infra_domain }}"
+
+- name: Set new DNSSEC Key to KEY variable - Internal Domain
+  shell: grep 'Key:' K*{{internal_domain}}*.private | cut -d ' ' -f 2
+  register: KEY
+
+- name: 2.1.4. Generate DNSSEC Key file - Internal Domain
+  template: src=dnsseckey.j2 dest=/var/named/{{ internal_domain }}.key
+  vars:
+    CURRENT_DOMAIN: "{{ internal_domain }}"
+
+- name: 2.1.5. Create the named configuration file
+  template: src=named.conf.j2 dest=/etc/named.conf
+
+- name: 2.1.6. Start and Enable named service
+  service: name=named state=restarted enabled=yes
+
+- name: Add DNS1=127.0.0.1 to ifcfg-eth file
+  lineinfile: dest=/etc/sysconfig/network-scripts/ifcfg-{{item}}
+              line='DNS1=127.0.0.1'
+  with_items:
+    - "{{ eth_dev_internal }}"
+    - "{{ eth_dev_external }}"
+
+- name: Prevent DNS being overwritten by dhcpclient
+  shell: echo "supersede domain-name-servers 127.0.0.1" > /etc/dhcp/dhclient-{{ eth_dev_external }}.conf
+
+- name: Restart Network Adapter
+  service: name=network state=restarted
+
+- name: Configure firewall to allow DNS query
+  command: /usr/sbin/lokkit --service=dns
+
+- name: 2.2.0 Add the Broker Host to DNS (nsupdate) - External Domain
+  shell: echo -e 'server 127.0.0.1\nupdate delete {{ broker_fqdn }} A\nupdate add {{ broker_fqdn }} 180 A {{ hostvars[inventory_hostname]["ansible_" + eth_dev_external]['ipv4']['address'] }}\nsend' | nsupdate -k /var/named/{{ infra_domain }}.key
+
+- name: 2.2.0 Add the Broker Host to DNS (nsupdate) - Internal Domain
+  shell: echo -e 'server 127.0.0.1\nupdate delete {{ broker_fqdn_internal }} A\nupdate add {{ broker_fqdn_internal }} 180 A {{ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['address'] }}\nsend' | nsupdate -k /var/named/{{ internal_domain }}.key
+
+- name: Remove host name from /etc/sysconfig/network
+  lineinfile: dest=/etc/sysconfig/network regexp='^HOSTNAME=' state=absent
+
+- name: 2.3.3. Set new host name in /etc/sysconfig/network
+  lineinfile: dest=/etc/sysconfig/network line='HOSTNAME={{ broker_fqdn }}'

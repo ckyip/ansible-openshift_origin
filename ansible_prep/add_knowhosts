@@ -1,0 +1,4 @@
+#!/bin/bash
+
+ssh-keygen -R $1
+ssh-keyscan -t rsa $1 >> ~/.ssh/known_hosts

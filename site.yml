@@ -1,46 +1,29 @@
 ---
-# This Playbook would deploy the entire OpenShift Origin environment
 
-- hosts: all
+#- hosts: all
+#  tasks: [ ]
+
+- hosts:  brokers, nodes
   roles:
    - role: common
   tags:
-    - common
     - nodes
     - brokers
-    - support_nodes
-
-- hosts: support_nodes
-  roles:
-    - role: mongod
-    - role: qpidd
-      when: mq_provider == "qpid"
-    - role: activemq
-      when: mq_provider == "activemq"
-    - role: named
-  tags:
-    - support_nodes
-
-- hosts: nodes
-  roles:
-    - role: oo-node
-  tags:
-    - nodes
 
 - hosts: brokers
   roles:
-    - role: oo-broker
-    - role: oo-console
-    - role: mcollective-client
+   - role: named
+   - role: mongod
+   - role: activemq
+   - role: mcollective-client
+   - role: broker
+   - role: broker-plugins
+   - role: web-console
   tags:
     - brokers
 
-- hosts: all
+- hosts: nodes
   roles:
-   - role: post-deploy
+    - role: node
   tags:
-    - common
     - nodes
-    - brokers
-    - support_nodes
-    - post_deploy

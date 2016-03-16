@@ -1,148 +1,117 @@
-# paths for executables we don't have ansible modules for
-rake: /usr/bin/rake
-bundle: /usr/bin/bundle
-restorecon: /sbin/restorecon
-egrep: /usr/bin/egrep
-awk: /usr/bin/awk
-oo-register-dns: /usr/sbin/oo-register-dns
+###########################
+# OpenShift Origin Version#
+###########################
 
-#FIXME - mongo have ansible modules now
-# Need ansible 1.3 for gem global installs
-mongo: /usr/bin/mongo
-
-# single_host - Is this deploying to a single host or multiple hosts?
-#
-# There are special considerations needed for deploying all components to a 
-# single machine and these will be executed conditionally based on the value
-# of this variable
-#
-# Should be set to one of the following:
-# 		"true"
-# 		"false"
-oo_single_host: "true"
-
-
-# oo_ipaddr - This is the default ip address used for serving
-#
-# The term "serving" is a bit vague but this var is a little overloaded
-# and will be re-evaluated per machine/host/server/whatever_you_like_to_call_it
-#
-#	This is set here as a variable mostly in the event it would like to be set to
-#	something other than the non-default ipv4 address (multiple NICs), or
-#	anything similar. We could probably make this rather sophisticated.
-oo_ipaddr: "{{ansible_default_ipv4.address}}"
-
-# oo_external_iface - This is the default interface used for node config
-#
-# Tis will be re-evaluated per machine/host
-#
-#	This is set here as a variable mostly in the event it would like to be set to
-#	something other than the non-default ipv4 address (multiple NICs), or
-#	anything similar. We could probably make this rather sophisticated.
-oo_external_iface: "{{ansible_default_ipv4.interface}}"
-
-# OpenShift Origin Version - nightly or stable?
-#
-# You can technically set both to true, but because of the package versions
-# oo_nightly will "win" at install/update time
-#
-# oo_stable - if set to true it must be paired with a oo_stable_ver number
-# 						at the time of this writing version 2 is most recent.
-oo_nightly: "false"
-oo_stable: "true"
-oo_stable_ver: "2"
-
-
-# TODO - support multiple NS servers
-# oo_ns_server_ip - the DNS server that is authoritative for your environment
-#
-# Most likely your named server
-# 
-# This needs to be 127.0.0.1 for all-in-one OpenShift Origin install.
-oo_ns_server_ip: "127.0.0.1"
+oo_stable_ver: "4"
+oo_distro: "rhel-6"
 
 # config vars
-## Update the broker_auth_salt using:
-#		
-#		$ openssl rand -base64 64
-#
-## Ouput will look something like:
-#
-#  	ds+R5kYI5Jvr0uanclmkavrXBSl0KQ34y3Uw4HrsiUNaKjYjgN/tVxV5mYPukpFR
-#  	radl1SiQ5lmr41zDo4QQww==
-#
-## Use that value (minus the newline):
-#
-#		broker_auth_salt: "ds+R5kYI5Jvr0uanclmkavrXBSl0KQ34y3Uw4HrsiUNaKjYjgN/tVxV5mYPukpFRradl1SiQ5lmr41zDo4QQww=="
-#
-## For more information:
-#		http://openshift.github.io/documentation/oo_deployment_guide_comprehensive.html#understand-and-change-the-broker-configuration
-#
-broker_auth_salt: "ClWqe5zKtEW4CJEMyjzQ"
 
-# Follow similar steps for broker_session_secret as you did for 
-# broker_auth_salt but do *NOT* make them the same.
-#FIXME - This should probably be stored externally or $something
-broker_session_secret: "rFeKpEGI0TlTECvLgBPD"
-broker_auth_key_passwd: ""
-broker_fqdn: broker.example.com
+
+###########################
+# Networking              #
+###########################
+
+eth_dev_internal: eth0
+eth_dev_external: eth1
+
+# Domain name
+infra_domain: openshift.pub
+internal_domain: openshift.internal
+
+######################
+#   Broker           #
+######################
+
+broker_fqdn         : broker.{{ infra_domain }}
+broker_fqdn_internal: broker.{{ internal_domain }}
+broker_auth_privkey_path: /etc/openshift/server_priv.pem
 broker_auth_pubkey_path: /etc/openshift/server_pub.pem
-broker_rsync_key_path: /etc/openshift/rsync_id_rsa
+#broker_auth_key_passwd: ""
+broker_rsync_key_name: rsync_id_rsa
+broker_rsync_key_path: /etc/openshift/{{ broker_rsync_key_name }}
+
+# Generated using: openssl rand -base64 64
+broker_auth_salt: "6TWBPAXZQFAsWUeUjMK26X6nQ5FU3PUYTjKX9T9eO4SL+wOb5EjLmcyc5kNruzVHv5A0NTapUoyDeGSiwQ24ZQ=="
+
+# Generated using: openssl rand -base64 64
+# (Should be different from Salt above)
+broker_session_secret: "J4uufoA+p+p2y+TRIfkiP2d3q6mmFZVMywTgWXY3oSWPwtkRtKKncXU8uyScLCniFUh/m9GMr3KC01HU/HuiaQ=="
+
+######################
+#   Web Console      #
+######################
+
+broker_webconsole_user: admin
+broker_webconsole_passwd: webadmin
+
+Generated using: openssl rand -base64 64
+broker_webconsole_secret: "WhUnbF8XnO0lz0U5d8bRZ2v1ScDbvyst62TjUu6CQLB54B5Jac9IAqxlR6z//MdSgdlx0V+EUt2l7+9qy/xYDw=="
+
+######################
+#   Named            #
+######################
 
 named_forwarder_ip: "8.8.8.8; 8.8.4.4"
-named_tsig_priv_key: ""
 
-# infra-domain - infrastrcture domain
-infra_domain: example.com
-
-# cloud_domain - subdomain for PaaS Cloud apps to live under
-cloud_domain: app.example.com
-
-#FIXME - activemq doesn't work in F19, using qpid instead
-# ---	ActiveMQ from the openshift deps repo works, needs to be fixed in 
-# 		the upstream Fedora repo.
-#
-# mq_provider are: activemq, qpid
-mq_provider: activemq
+######################
+#  ActiveMQ          #
+######################
 
 # mq_ variable for are message queuing 
-mq_fqdn: "{{broker_fqdn}}"
+mq_fqdn: "{{broker_fqdn_internal}}"
 mq_server_user: mcollective
 mq_server_password: marionette
+mq_server_adminpass: adminpass
+mq_psk: mcpsk
 
-# MongoDB information
-mongo_auth_user: openshift
+
+#########################
+# MongoDB Configuration #
+#########################
+
+mongo_db_fqdn: localhost
+
 mongo_db_name: openshift_broker_dev
-mongo_db_fqdn: "{{broker_fqdn}}"
-mongo_auth_passwd: mooo
+
+mongo_auth_user: openshift
+mongo_auth_passwd: userpass
 mongo_admin_user: admin
-mongo_admin_passwd: admin
-
-# The console's default login is 
-# 		username: demo 
-# 		password: demo
-#
-# This should obviously be changed if necessary post-installation
-# 
-# The authentication mechanism for this demo is htpasswd and was generated
-# using the following command:
-#     
-#     htpasswd -c console_htpasswd demo
-#
-# The console_htpasswd was then installed to the location on the oo-console:
-#
-# 		/etc/openshift/htpasswd
-#
-console_conf_path: /etc/openshift/console.conf
+mongo_admin_passwd: adminpass
 
 
-os_unmanaged_users: "root,adm,apache"
+######################
+#  Common            #
+######################
 
-configure_cgroups: "true"
-
-gear_httpd_dir: /var/lib/openshift/.httpd.d/
-gear_root_dir: /var/lib/openshift/
-
-#
 # ntp timeserver
-ntpserver: clock.redhat.com
+ntpserver: time.nrc.ca
+
+######################
+#  Node              #
+######################
+
+cartridges_mandatory: openshift-origin-cartridge-cron
+
+cartridges_app:
+  - openshift-origin-cartridge-python
+  - openshift-origin-cartridge-php
+  - openshift-origin-cartridge-ruby
+  - openshift-origin-cartridge-nodejs
+  - openshift-origin-cartridge-diy
+  - openshift-origin-cartridge-perl
+
+cartridges_db:
+  - openshift-origin-cartridge-mongodb
+  - openshift-origin-cartridge-postgresql
+  - openshift-origin-cartridge-mysql
+
+cartridges_admin:
+  - openshift-origin-cartridge-10gen-mms-agent
+  - openshift-origin-cartridge-phpmyadmin
+
+cartridges_rec_dep:
+  - openshift-origin-cartridge-dependencies-recommended-all
+
+cartridges_opt_dep:
+  - php54-php-mcrypt

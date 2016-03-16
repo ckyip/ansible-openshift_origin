@@ -1,0 +1,21 @@
+#!/bin/bash
+
+[ $(id -u) != 0 ] && echo "Error: You must be root to execute this script" && exit 1
+/usr/bin/rpm -qi libguestfs-tools > /dev/null || { echo "Error: libguestfs-tools is not installed";exit 1; }
+
+[ $# != 2 ] && echo "Error:  Please provide a vm name and IP" && exit 2
+
+function getVMStatus
+{
+        echo "$(virsh list --all | grep -w " $1 " | awk '{print$NF}')"
+}
+
+vm=$1
+
+status=$(getVMStatus $vm)
+
+[ "$status" == "" ] && echo "Error: VM: $vm not found." && exit 3
+[ "$status" != "off" ] && [ "$status" != "crashed" ] && echo "Error: Please turn off \"$vm ($status)\" and try again." && exit 4
+
+virt-edit $1 /etc/sysconfig/network-scripts/ifcfg-eth0 -e "s/^IPADDR.*$/IPADDR=$2/"
+[ $? == 0 ] && echo "[$1/eth0] IP Address = $2"

@@ -1,0 +1,39 @@
+---
+
+- name: 7.1.0. Create Configuration Files
+  shell: cp {{item}}.example {{item}}
+  with_items:
+    - /etc/openshift/plugins.d/openshift-origin-auth-remote-user.conf
+    - /etc/openshift/plugins.d/openshift-origin-msg-broker-mcollective.conf
+
+- name: Update MCollective.conf
+  replace: dest=/etc/openshift/plugins.d/openshift-origin-msg-broker-mcollective.conf
+           regexp='^MCOLLECTIVE_CONFIG.*'
+           replace='MCOLLECTIVE_CONFIG=/opt/rh/ruby193/root/etc/mcollective/client.cfg'
+
+- name: Retrieve TSIG Key
+  shell: grep secret /var/named/{{ infra_domain }}.key | awk '{print $2}' | cut -d';' -f1
+  register: TSIG_key
+
+- name: 7.2.0. Configure DNS plugin
+  template: src=openshift-origin-dns-nsupdate.conf dest=/etc/openshift/plugins.d/openshift-origin-dns-nsupdate.conf
+
+- name: 7.3.0. Configure an Authentication Plugin (htpasswd)
+  shell: cp {{item}}-basic.conf.sample {{item}}.conf
+  with_items:
+    - /var/www/openshift/broker/httpd/conf.d/openshift-origin-auth-remote-user
+
+- name: Create a new default user for web console login
+  shell: htpasswd -b -c /etc/openshift/htpasswd {{ broker_webconsole_user }} {{ broker_webconsole_passwd }}
+
+- name: 7.4.0. Install the Adminstrative Console
+  yum: pkg=rubygem-openshift-origin-admin-console state=latest
+
+- name: 7.5.0. Start and Enable Openshift-Broker
+  service: name=openshift-broker state=restarted enabled=yes
+
+- name: Ensure Apache Listens on HTTPS
+  lineinfile: dest=/etc/httpd/conf/httpd.conf line='Listen 443' 
+
+- name: 7.7.0. Start and Enable Apache
+  service: name=httpd state=restarted enabled=yes

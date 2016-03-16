@@ -1,0 +1,95 @@
+---
+- name: 6.1.0. Install Necessary Packages
+  yum: pkg={{item}} state=latest
+  with_items:
+    - openshift-origin-broker
+    - openshift-origin-broker-util
+    - rubygem-openshift-origin-auth-remote-user
+    - rubygem-openshift-origin-auth-mongo
+    - rubygem-openshift-origin-msg-broker-mcollective
+    - rubygem-openshift-origin-dns-avahi
+    - rubygem-openshift-origin-dns-nsupdate
+    - rubygem-openshift-origin-dns-route53
+    - ruby193-rubygem-passenger
+    - ruby193-mod_passenger
+
+- name: 6.2.0. Enable network & sshd Services
+  service: name={{item}} state=started enabled=yes
+  with_items:
+        - network
+        - sshd
+
+- name: 6.2.0. Add ssh, http, https to iptables
+  command: /usr/sbin/lokkit --service={{item}}
+  with_items:
+    - ssh
+    - https
+    - http
+
+- name: 6.3.0. Generate Access Key (RSA 2048 private)
+  command: /usr/bin/openssl genrsa -out {{ broker_auth_privkey_path }} 2048
+
+- name: 6.3.0. Generate Access Key (RSA 2048 public)
+  shell: openssl rsa -in {{ broker_auth_privkey_path }} -pubout > {{ broker_auth_pubkey_path }}
+
+- name: 6.3.0. Remove existing SSH Key (if any)
+  file: path=/root/.ssh/{{item}} state=absent
+  with_items:
+    - rsync_id_rsa
+    - rsync_id_rsa.pub
+
+- name: 6.3.0. Generate SSH Key (RSA 2048)
+  shell: ssh-keygen -t rsa -b 2048 -N '' -f ~/.ssh/{{ broker_rsync_key_name }}
+
+- name: 6.3.0. Copy keys to /etc/openshift
+  shell: cp ~/.ssh/{{ broker_rsync_key_name }}{{ item }} {{ broker_rsync_key_path }}{{ item }}
+  with_items:
+    -
+    - .pub
+
+- name: 6.4.0. Configure SELinux (seboolean)
+  seboolean:  name={{item}} state=true persistent=yes
+  with_items:
+    - httpd_unified
+    - httpd_can_network_connect
+    - httpd_can_network_relay
+    - httpd_run_stickshift
+    - named_write_master_zones
+    - allow_ypbind
+    - httpd_verify_dns
+    - httpd_enable_homedirs
+    - httpd_execmem
+    - httpd_read_user_content
+
+- name: semanage fcontext
+  shell:  semanage fcontext -a -t {{item}}
+  with_items: 
+    - httpd_var_run_t '/var/www/openshift/broker/httpd/run(/.*)?'
+    - httpd_tmp_t '/var/www/openshift/broker/tmp(/.*)?'
+    - httpd_log_t '/var/log/openshift/broker(/.*)?'
+
+- name: chcon
+  shell:  chcon -R -t {{item}}
+  with_items: 
+    - httpd_log_t /var/log/openshift/broker
+    - httpd_tmp_t /var/www/openshift/broker/httpd/run
+    - httpd_var_run_t /var/www/openshift/broker/httpd/run
+
+- name: fixfiles
+  shell: fixfiles -R {{item}} restore
+  with_items:
+    - ruby193-rubygem-passenger
+    - ruby193-mod_passenger
+    - rubygem-passenger
+    - mod_passenger
+
+- name: restorecon
+  shell: restorecon -{{item}}
+  with_items:
+    - rv /var/run
+    - rv /opt
+    - rv /var/www/openshift/broker/tmp
+    - v '/var/log/openshift/broker/user_action.log'
+
+- name: 6.5.0. Configure Broker
+  template: src=broker.conf.j2 dest=/etc/openshift/broker.conf

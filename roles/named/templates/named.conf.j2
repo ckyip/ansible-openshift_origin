@@ -1,4 +1,3 @@
-// named.conf
 //
 // Provided by Red Hat bind package to configure the ISC BIND named(8) DNS
 // server as a caching only nameserver (as a localhost DNS resolver only).
@@ -7,14 +6,15 @@
 //
 
 options {
-    #FIXME - Something in Fedora/BIND changed, this doesn't work anymore
-    #        but works if you comment it out ... because $reasons
-    #listen-on port 53 { any; };
-    directory "/var/named";
-    dump-file "/var/named/data/cache_dump.db";
-    statistics-file "/var/named/data/named_stats.txt";
-    memstatistics-file "/var/named/data/named_mem_stats.txt";
-    allow-query { any; };
+    listen-on port 53 { 127.0.0.1; {{ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['address'] }}; {{ hostvars[inventory_hostname]["ansible_" + eth_dev_external]['ipv4']['address'] }}; };
+    directory   "/var/named";
+    dump-file   "/var/named/data/cache_dump.db";
+        statistics-file "/var/named/data/named_stats.txt";
+        memstatistics-file "/var/named/data/named_mem_stats.txt";
+    allow-query     { any; };
+    {% set internal_ip =  [ hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['network'], hostvars[inventory_hostname]["ansible_" + eth_dev_internal]['ipv4']['netmask'] ] %}
+    {% set internal_ip = internal_ip | join ('/') %}
+    allow-recursion { 127.0.0.1; {{ internal_ip | ipaddr('net') }}; };
     recursion yes;
 
     /* Path to ISC DLV key */
@@ -26,15 +26,15 @@ options {
 };
 
 logging {
-    channel default_debug {
-        file "data/named.run";
-        severity dynamic;
-    };
+        channel default_debug {
+                file "data/named.run";
+                severity dynamic;
+        };
 };
 
 // use the default rndc key
 include "/etc/rndc.key";
- 
+
 controls {
     inet 127.0.0.1 port 953
     allow { 127.0.0.1; } keys { "rndc-key"; };
@@ -42,16 +42,18 @@ controls {
 
 include "/etc/named.rfc1912.zones";
 
+include "{{ infra_domain }}.key";
+include "{{ internal_domain }}.key";
+
 zone "{{ infra_domain }}" IN {
-    type master;
-    file "{{ infra_domain }}.db";
+	type master;
+	file "dynamic/{{ infra_domain }}.db";
+	allow-update { key {{ infra_domain }} ; } ;
 };
 
-include "{{ cloud_domain }}.key";
-
-zone "{{ cloud_domain }}" IN {
-    type master;
-    file "dynamic/{{ cloud_domain }}.db";
-    allow-update { key {{ cloud_domain }} ; };
+zone "{{ internal_domain }}" IN {
+	type master;
+	file "dynamic/{{ internal_domain }}.db";
+	allow-update { key {{ internal_domain }} ; } ;
+        allow-query { 127.0.0.1; {{ internal_ip | ipaddr('net') }}; };
 };
-
