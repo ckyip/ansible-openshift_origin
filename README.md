@@ -24,7 +24,7 @@ Deploy Host
 
 ## Configuration
 
-1. Place Internal IP for Broker & Node in /etc/ansible/hosts 
+* Place Internal IP for Broker & Node in /etc/ansible/hosts 
 
 
 Example:
@@ -36,8 +36,8 @@ Example:
     192.168.1.101
     192.168.1.102
 
-2. Please change default role settings at ansible-openshift_origin/group_vars/all
-   (i.e. login password and keys)
+* Please change default role settings at ansible-openshift_origin/group_vars/all
+  (i.e. login password and keys)
 
 
 ## Installation
